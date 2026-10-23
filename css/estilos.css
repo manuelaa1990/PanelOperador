@@ -1292,15 +1292,76 @@ body {
   .tabla-pie { flex-wrap: wrap; }
 }
 
-@media (max-height: 780px) and (min-width: 1221px) {
-  .kpi { min-height: 118px; }
+/* Portátiles y pantallas con poca altura: se compacta todo para que el
+   historial siempre tenga varias filas visibles. Si aun así no cabe, el
+   panel completo se puede desplazar; nunca se deja la tabla en blanco. */
+@media (max-height: 900px) and (min-width: 1221px) {
+  #app {
+    gap: 8px;
+    padding: 8px 12px 6px;
+    overflow-y: auto;
+  }
+
+  .cabecera { min-height: 46px; gap: 12px; }
+  .logo { width: 38px; height: 38px; }
+  .logo svg { width: 22px; height: 22px; }
+  .marca h1 { font-size: 1rem; }
+  .reloj time { font-size: 1.25rem; }
+  .reloj span { margin-top: 3px; font-size: .6rem; }
+
+  .banner { min-height: 54px; padding: 6px 12px; gap: 10px; }
+  .banner-icono { width: 34px; height: 34px; font-size: 1.15rem; }
+  .banner-texto h2 { font-size: clamp(1.15rem, 1.5vw, 1.45rem); }
+  .banner-texto p,
+  .banner-texto .banner-accion { margin-top: 2px; font-size: .74rem; }
+  .banner-edad { min-width: 130px; padding-left: 10px; }
+  .banner-edad span { font-size: .55rem; }
+  .banner-edad strong { font-size: .9rem; }
+  .banner-edad small { font-size: .62rem; }
+
+  .rejilla,
+  .izquierda,
+  .derecha { gap: 8px; }
+  .kpis { gap: 8px; }
+
+  .kpi { min-height: 96px; padding: 8px 10px 7px 13px; }
+  .kpi::before { top: 8px; bottom: 8px; }
+  .kpi-nombre { font-size: .64rem; }
+  .kpi-estado { padding: 2px 6px; font-size: .55rem; }
+  .kpi-valor { margin-top: 5px; }
+  .kpi-valor strong { font-size: clamp(1.65rem, 2vw, 2rem); }
+  .kpi-valor .unidad { font-size: .8rem; }
   .kpi-rango { display: none; }
-  .kpi-valor strong { font-size: clamp(1.8rem, 2.2vw, 2.3rem); }
-  .kpi canvas.sparkline { height: 24px; }
-  .kpi.compacta { min-height: 98px; }
-  .kpi.compacta .kpi-valor strong { font-size: clamp(1.3rem, 1.5vw, 1.6rem); }
-  .kpi.compacta canvas.sparkline { height: 18px; }
-  .banner { min-height: 70px; padding: 8px 16px; }
-  .banner-icono { width: 42px; height: 42px; font-size: 1.3rem; }
+  .kpi-pie { padding-top: 4px; gap: 6px; }
+  .kpi-limite { font-size: .6rem; }
+  .kpi canvas.sparkline { height: 18px; }
+
+  .kpi.compacta { min-height: 78px; padding: 6px 10px 5px 13px; }
+  .kpi.compacta .kpi-nombre { font-size: .62rem; }
+  .kpi.compacta .kpi-valor { margin-top: 3px; }
+  .kpi.compacta .kpi-valor strong { font-size: clamp(1.15rem, 1.4vw, 1.4rem); }
+  .kpi.compacta .kpi-pie { padding-top: 2px; }
+  .kpi.compacta .kpi-limite { font-size: .56rem; }
+  .kpi.compacta canvas.sparkline { height: 14px; }
+
+  .panel-cabecera { padding: 6px 12px; }
+  .panel-cabecera h3 { font-size: .65rem; }
+  .btn-rango { padding: 3px 6px; font-size: .58rem; }
+  .filtro-historial { padding: 5px 12px; gap: 8px; }
+  .filtro-historial label { font-size: .55rem; gap: 2px; }
+  .filtro-historial input { min-width: 150px; padding: 3px 6px; font-size: .65rem; }
+  .btn-consultar { padding: 4px 9px; font-size: .62rem; }
+  .historial-info { padding: 4px 12px; gap: 6px; }
+  .historial-info #historialInfo { font-size: .62rem; }
+  .historial-modo { font-size: .55rem; }
+
+  .tabla-historial { font-size: .7rem; }
+  .tabla-historial th { padding: 4px 8px; font-size: .54rem; }
+  .tabla-historial th small { font-size: .5rem; }
+  .tabla-historial td { padding: 4px 8px; }
+  .tabla-pie { padding: 4px 12px; font-size: .6rem; }
+  .btn-pagina { padding: 3px 6px; font-size: .58rem; }
+
   .panel-ayuda { display: none; }
+  .panel-historial { min-height: 260px; }
 }

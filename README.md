@@ -74,6 +74,10 @@ variables de `lecturas_hvac` y el estado (**Marcha / Reposo**) de cada lectura.
   se calcula con Supabase, así que un rango de varios días sigue siendo consultable.
 - Las fechas se muestran en la zona horaria de `zonaHoraria` (`America/Caracas`).
 - El botón **Consultar** sigue disponible para aplicar un rango manual.
+- En pantallas de poca altura (portátiles de 768 px o navegador con zoom) el
+  panel se compacta automáticamente para que la tabla muestre varias filas. Si
+  aun así no cabe, el panel completo se puede desplazar; la tabla nunca queda
+  aplastada hasta desaparecer.
 
 ## Archivos
 
