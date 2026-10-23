@@ -28,18 +28,21 @@ interesa saber si el equipo está trabajando, no el número técnico. Ese estado
 se muestra cuando los datos están frescos; si el ESP32 deja de enviar, la franja
 cambia a **Falla · sin datos** y no se inventa un estado de marcha.
 
-Si las presiones llevan más de **45 min** igualadas aparece un aviso; a los
-**60 min** se considera falla. También se avisa si hay **3 paradas cortas**
-(entre 1 y 10 min) en una hora, porque puede ser una fuga o un presostato mal
-regulado.
+Si las presiones llevan más de **30 min** igualadas aparece un aviso; a los
+**45 min** se considera **FALLA**. También se avisa si la presión de succión
+completa **3 ciclos en una hora**: baja a ≤ 30 PSI, sube a ≥ 55 PSI y vuelve
+a bajar, con una duración total de **30 segundos a 5 minutos** por ciclo. Ese
+patrón (por ejemplo, 60 → 25 → 60 PSI) puede indicar una fuga, una falla del
+solenoide o un presostato mal regulado.
 
 ### Criterios de color
 
 - **Verde:** todo dentro de rango.
 - **Ámbar:** un valor se acerca al límite, las lecturas están atrasadas o hay un
   problema momentáneo de conexión.
-- **Rojo:** un valor superó el límite o el equipo dejó de enviar datos.
-- **Gris azulado:** el equipo está en reposo normal (presiones igualadas hace menos de 45 min).
+- **Rojo:** un valor superó el límite, el equipo dejó de enviar datos o las
+  presiones llevan 45 min igualadas.
+- **Gris azulado:** el equipo está en reposo normal (presiones igualadas hace menos de 30 min).
 
 El estado se calcula con los límites de `js/config.js`:
 

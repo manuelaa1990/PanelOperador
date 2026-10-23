@@ -300,7 +300,8 @@
     if (criticas.length) {
       const extra = criticas.length > 1 ? ' (+' + (criticas.length - 1) + ' más)' : '';
       return {
-        clase: 'critico', icono: '!', titulo: 'Alarma activa',
+        clase: 'critico', icono: '!',
+        titulo: criticas[0].bannerTitulo || 'Alarma activa',
         detalle: criticas[0].titulo + ': ' + criticas[0].detalle + extra
       };
     }
@@ -397,6 +398,7 @@
           lista.push({
             nivel: 'critico',
             titulo: 'Equipo detenido demasiado tiempo',
+            bannerTitulo: 'Falla · equipo detenido',
             detalle: 'Las presiones llevan ' + duracionTexto(duracion) + ' igualadas.',
             accion: 'Revisar el equipo. Puede estar detenido por una falla.'
           });
@@ -412,43 +414,68 @@
     }
 
     const desde = Date.now() - CICLOS.ventanaMin * 60000;
-    const paradas = [];
-    let inicioParada = null;
-    let ultimaFecha = null;
+    const minCicloMs = CICLOS.cortoMinMin * 60000;
+    const maxCicloMs = CICLOS.cortoMaxMin * 60000;
+    const bajo = CICLOS.presionBajaMinPsi;
+    const alto = CICLOS.presionBajaMaxPsi;
+    const serie = [];
 
     filas.forEach((fila) => {
       const t = new Date(fila.created_at).getTime();
-      if (!Number.isFinite(t)) return;
-      if (ultimaFecha !== null && t - ultimaFecha > 5 * 60000) {
-        inicioParada = null;
-      }
-      ultimaFecha = t;
+      const valor = fila.presion_baja;
+      if (!Number.isFinite(t) || !Number.isFinite(valor)) return;
+      if (t >= desde - maxCicloMs) serie.push({ t: t, v: valor });
+    });
 
-      const marcha = esMarcha(fila);
-      if (marcha === null) {
-        inicioParada = null;
-        return;
-      }
+    // Mediana móvil de 3 para ignorar un pico aislado del sensor.
+    const suave = serie.map((punto, i) => {
+      const valores = [serie[i - 1], punto, serie[i + 1]]
+        .filter(Boolean)
+        .map((p) => p.v)
+        .sort((a, b) => a - b);
+      return { t: punto.t, v: valores[Math.floor(valores.length / 2)] };
+    });
 
-      if (!marcha && inicioParada === null) {
-        inicioParada = t;
-      } else if (marcha && inicioParada !== null) {
-        const duracion = t - inicioParada;
-        if (duracion >= CICLOS.cortoMinMin * 60000 &&
-            duracion < CICLOS.cortoMaxMin * 60000) {
-          paradas.push({ fin: t });
+    const ciclos = [];
+    let enBajo = false;
+    let inicioBajo = null;
+    let pasoAlto = false;
+    let anterior = null;
+
+    suave.forEach((punto) => {
+      if (anterior !== null && punto.t - anterior > 2 * 60000) {
+        enBajo = false;
+        inicioBajo = null;
+        pasoAlto = false;
+      }
+      anterior = punto.t;
+
+      if (punto.v <= bajo) {
+        if (enBajo && pasoAlto) {
+          const duracion = punto.t - inicioBajo;
+          if (duracion >= minCicloMs && duracion <= maxCicloMs) {
+            ciclos.push({ fin: punto.t });
+          }
+          inicioBajo = punto.t;
+          pasoAlto = false;
+        } else if (!enBajo) {
+          enBajo = true;
+          inicioBajo = punto.t;
+          pasoAlto = false;
         }
-        inicioParada = null;
+      } else if (punto.v >= alto && enBajo) {
+        pasoAlto = true;
       }
     });
 
-    const recientes = paradas.filter((p) => p.fin >= desde);
+    const recientes = ciclos.filter((c) => c.fin >= desde);
     if (recientes.length >= CICLOS.minimo) {
       lista.push({
         nivel: 'aviso',
-        titulo: 'Arranques y paradas repetidas',
-        detalle: recientes.length + ' paradas cortas en la última hora.',
-        accion: 'Avisar al técnico: puede ser una fuga o un presostato mal regulado.'
+        titulo: 'Posible ciclo por presostato o fuga',
+        detalle: 'Se detectaron ' + recientes.length +
+          ' ciclos cortos de presión de succión en la última hora.',
+        accion: 'Avisar al técnico: revise fugas, el solenoide y el presostato.'
       });
     }
   }

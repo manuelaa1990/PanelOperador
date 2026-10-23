@@ -66,15 +66,17 @@ window.CONFIG_SUPERVISION = {
     marchaDiferencialPsi: 30,
 
     // Reposo prolongado con las presiones igualadas
-    reposoAvisoMin: 45,   // ámbar: puede ser una falla
-    reposoFallaMin: 60,   // rojo: se considera falla
+    reposoAvisoMin: 30,   // ámbar: puede ser una falla
+    reposoFallaMin: 45,   // rojo: se considera falla
 
-    // Arranques y paradas repetidas (posible fuga o presostato mal regulado)
+    // Ciclos cortos de la presión de succión (posible fuga, solenoide o presostato)
     ciclos: {
-      ventanaMin: 60,     // se miran las paradas de la última hora
-      cortoMaxMin: 10,    // una parada "corta" dura menos de 10 min
-      cortoMinMin: 1,     // se ignoran cortes de menos de 1 min
-      minimo: 3           // 3 paradas cortas en la ventana = aviso
+      ventanaMin: 60,          // se miran los ciclos de la última hora
+      cortoMinMin: 0.5,        // un ciclo completo dura al menos 30 s
+      cortoMaxMin: 5,          // y como máximo 5 min (con retardador)
+      presionBajaMinPsi: 30,   // zona baja: cerca del mínimo del presostato
+      presionBajaMaxPsi: 55,   // zona alta: recuperación de la presión
+      minimo: 3                // 3 ciclos en la ventana = aviso
     }
   },
 
