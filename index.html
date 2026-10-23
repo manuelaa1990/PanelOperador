@@ -33,6 +33,10 @@
       <div class="chip-conexion neutro" id="chipConexion" role="status">
         <span class="punto" aria-hidden="true"></span>
         <span id="txtConexion">Conectando…</span>
+        <span class="senal" id="senalTexto">—</span>
+        <span class="barras" id="senalBarras" aria-hidden="true">
+          <i></i><i></i><i></i><i></i>
+        </span>
       </div>
 
       <div class="reloj">
@@ -55,6 +59,7 @@
       <div class="banner-texto">
         <h2 id="bannerTitulo">Conectando</h2>
         <p id="bannerDetalle">Esperando la primera lectura del equipo.</p>
+        <p class="banner-accion" id="bannerAccion" hidden>Revisar energía o conexión del equipo.</p>
       </div>
       <div class="banner-edad">
         <span>Última lectura</span>
@@ -67,7 +72,7 @@
     <main class="rejilla">
 
       <section class="izquierda">
-        <!-- Tarjetas grandes: solo los canales marcados como principales -->
+        <!-- Tarjetas: principales arriba y temperaturas adicionales en la segunda fila -->
         <div class="kpis" id="kpis"></div>
 
         <!-- Historial consultable por rango de fechas -->
@@ -93,7 +98,10 @@
             <button type="submit" class="btn-consultar" id="btnConsultar">Consultar</button>
           </form>
 
-          <p class="historial-info" id="historialInfo" aria-live="polite">Consultando…</p>
+          <p class="historial-info" aria-live="polite">
+            <span class="historial-modo" id="historialModo">En vivo</span>
+            <span id="historialInfo">Consultando…</span>
+          </p>
 
           <div class="tabla-caja">
             <table class="tabla-historial" aria-label="Historial de lecturas">
@@ -104,6 +112,7 @@
 
           <footer class="tabla-pie">
             <span id="tablaRangoInfo">—</span>
+            <span class="tabla-actualizado" id="tablaActualizado">—</span>
             <div class="paginacion">
               <button type="button" class="btn-pagina" id="btnPaginaAnterior">Anterior</button>
               <span id="paginaActual">Página 1 de 1</span>
@@ -121,34 +130,6 @@
             <span class="contador" id="contadorAlarmas">0</span>
           </header>
           <div class="lista-alarmas" id="listaAlarmas" aria-live="polite"></div>
-        </article>
-
-        <!-- Estado del equipo y lecturas secundarias -->
-        <article class="panel panel-equipo">
-          <header class="panel-cabecera">
-            <h3>Estado del equipo</h3>
-            <span class="chip-equipo neutro" id="chipEquipo">Sin datos</span>
-          </header>
-
-          <dl class="datos-equipo">
-            <div>
-              <dt>Señal del equipo</dt>
-              <dd><span class="senal" id="senalTexto">—</span>
-                <span class="barras" id="senalBarras" aria-hidden="true">
-                  <i></i><i></i><i></i><i></i>
-                </span>
-              </dd>
-            </div>
-            <div>
-              <dt>Última lectura recibida</dt>
-              <dd id="equipoUltima">—</dd>
-            </div>
-          </dl>
-
-          <div class="otras">
-            <h4>Otras lecturas</h4>
-            <ul id="otrasLecturas"></ul>
-          </div>
         </article>
 
         <!-- Instrucción permanente para personal sin conocimientos técnicos -->

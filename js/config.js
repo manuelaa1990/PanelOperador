@@ -47,7 +47,8 @@ window.CONFIG_SUPERVISION = {
   /* ------------------------------- HISTORIAL ------------------------------ */
   historial: {
     porPagina: 100,       // filas por página de la tabla
-    horasPorDefecto: 2    // rango inicial al abrir el panel
+    horasPorDefecto: 24,  // rango inicial: últimas 24 horas
+    autoMs: 30000         // refresco automático cuando está "En vivo"
   },
 
   /* ------------------------------- FRESCURA ------------------------------- */
@@ -97,8 +98,10 @@ window.CONFIG_SUPERVISION = {
      corto       etiqueta corta de la tarjeta y de la tabla
      unidad      °C o PSI
      decimales   cifras decimales que se muestran
-     principal   true  -> tarjeta grande arriba
-                 false -> lista "Otras lecturas" del panel del equipo
+     principal   true  -> tarjeta grande de la primera fila
+     tarjeta     true  -> tarjeta adicional de la segunda fila
+     compacta    true  -> versión compacta de la tarjeta adicional
+                 (sin principal ni tarjeta: solo aparece en el historial)
      max         límite de alarma (rojo)
      aviso       valor de precaución (ámbar)
      min         límite inferior de alarma (opcional)
@@ -133,15 +136,18 @@ window.CONFIG_SUPERVISION = {
     },
     {
       id: 'temp2', nombre: 'Salida del evaporador', corto: 'T. evaporador',
-      unidad: '°C', decimales: 1, principal: false, color: '#3ddc97'
+      unidad: '°C', decimales: 1, principal: false, tarjeta: true, compacta: true,
+      color: '#3ddc97'
     },
     {
       id: 'temp4', nombre: 'Temperatura del líquido', corto: 'T. líquido',
-      unidad: '°C', decimales: 1, principal: false, color: '#5eead4'
+      unidad: '°C', decimales: 1, principal: false, tarjeta: true, compacta: true,
+      color: '#5eead4'
     },
     {
       id: 'temp5', nombre: 'Temperatura ambiente', corto: 'T. ambiente',
-      unidad: '°C', decimales: 1, principal: false, color: '#facc15'
+      unidad: '°C', decimales: 1, principal: false, tarjeta: true, compacta: true,
+      color: '#facc15'
     }
   ]
 };

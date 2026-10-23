@@ -15,17 +15,23 @@ escribe el ESP32 cada 10 segundos.
 
 | Zona | Contenido |
 |---|---|
-| Cabecera | Cliente, planta, hora local, estado de la conexión y botón de pantalla completa |
-| Franja de estado | Un solo mensaje grande: **Sistema en orden**, **Requiere atención**, **Alarma activa**, **Sin señal** o **Equipo en reposo** |
-| Tarjetas grandes | Temperatura de descarga, temperatura de succión, presión de descarga y presión de succión, con valor actual, mínimo/máximo de las últimas 2 h y mini-tendencia |
-| Historial | Tabla con todas las variables, filtro por fecha y hora, paginación y estado del equipo en cada lectura |
+| Cabecera | Cliente, planta, hora local, estado **Conectado / Falla / Error** con la calidad de la señal y botón de pantalla completa |
+| Franja de estado | Un solo mensaje grande: **Sistema en orden**, **Requiere atención**, **Alarma activa**, **Falla · sin datos** o **Equipo en reposo** |
+| Tarjetas grandes | Temperatura de descarga, temperatura de succión, presión de descarga, presión de succión, salida del evaporador, temperatura del líquido y temperatura ambiente, con valor actual, mínimo/máximo de las últimas 2 h y mini-tendencia |
+| Historial | Tabla con todas las variables, modo **En vivo / Histórico**, filtro por fecha y hora, paginación y estado del equipo en cada lectura |
 | Alarmas | Lista en lenguaje sencillo con el valor, el límite y qué hacer |
-| Estado del equipo | En marcha / en reposo, calidad de la señal WiFi, última lectura y lecturas secundarias |
 | Ayuda | Instrucción permanente: anotar, no manipular y avisar |
 
-El estado **En marcha / En reposo** se deduce de la diferencia entre la presión de
+El estado **Equipo en reposo** se deduce de la diferencia entre la presión de
 descarga y la de succión, pero ese cálculo no se muestra: al operador solo le
-interesa saber si el equipo está trabajando, no el número técnico.
+interesa saber si el equipo está trabajando, no el número técnico. Ese estado solo
+se muestra cuando los datos están frescos; si el ESP32 deja de enviar, la franja
+cambia a **Falla · sin datos** y no se inventa un estado de marcha.
+
+Si las presiones llevan más de **45 min** igualadas aparece un aviso; a los
+**60 min** se considera falla. También se avisa si hay **3 paradas cortas**
+(entre 1 y 10 min) en una hora, porque puede ser una fuga o un presostato mal
+regulado.
 
 ### Criterios de color
 
@@ -33,7 +39,7 @@ interesa saber si el equipo está trabajando, no el número técnico.
 - **Ámbar:** un valor se acerca al límite, las lecturas están atrasadas o hay un
   problema momentáneo de conexión.
 - **Rojo:** un valor superó el límite o el equipo dejó de enviar datos.
-- **Gris azulado:** el equipo está en reposo (presiones igualadas), no es una alarma.
+- **Gris azulado:** el equipo está en reposo normal (presiones igualadas hace menos de 45 min).
 
 El estado se calcula con los límites de `js/config.js`:
 
@@ -46,18 +52,25 @@ El estado se calcula con los límites de `js/config.js`:
 
 ## Historial de lecturas
 
-La tabla muestra todas las variables de `lecturas_hvac` y el estado del equipo
-(**Marcha / Reposo**) en cada lectura.
+La tabla funciona como un pequeño **sumario** del equipo: muestra todas las
+variables de `lecturas_hvac` y el estado (**Marcha / Reposo**) de cada lectura.
 
 - Se puede escribir un rango **Desde / Hasta** o usar los botones **2 h**, **24 h**
   y **7 días**.
-- El rango inicial es de las últimas 2 horas; se cambia con
+- El rango inicial es de las últimas **24 horas**; se cambia con
   `historial.horasPorDefecto` en `js/config.js`.
+- Cuando el rango termina en el presente, el indicador dice **En vivo** y la tabla
+  se actualiza sola cada **30 s** en la primera página, mientras el operador esté
+  al inicio de la tabla.
+- Si el operador pasa a una página anterior o consulta un rango pasado, el
+  indicador cambia a **Histórico** y la tabla queda fija para que pueda leer sin
+  que los datos se muevan. Al pulsar **24 h** vuelve al presente.
+- Si no hay lecturas en el rango, muestra la última lectura recibida y un botón
+  **Ver últimas 24 h**.
 - La tabla trae **100 filas por página** y permite avanzar y retroceder. El total
   se calcula con Supabase, así que un rango de varios días sigue siendo consultable.
 - Las fechas se muestran en la zona horaria de `zonaHoraria` (`America/Caracas`).
-- La tabla se consulta con el botón **Consultar**; no se recarga sola mientras se
-  está leyendo una página antigua.
+- El botón **Consultar** sigue disponible para aplicar un rango manual.
 
 ## Archivos
 
@@ -81,7 +94,8 @@ sin frameworks, y funciona sin conexión a Internet salvo para consultar Supabas
    - `contacto.nombre` y `contacto.telefono`: a quién llamar.
    - `supabase.url`, `supabase.clave` y `supabase.tabla`.
    - Límites de cada canal (`aviso`, `max`, opcionalmente `min`).
-   - `historial.porPagina` y `historial.horasPorDefecto` para la tabla.
+   - `historial.porPagina`, `historial.horasPorDefecto` y `historial.autoMs`
+     para la tabla.
 2. Abra `index.html` en el navegador. Para evitar restricciones de archivos
    locales, se recomienda servirlo por HTTP:
 
@@ -163,8 +177,10 @@ Opciones recomendadas para el monitor fijo:
 
 - Desactivar el apagado de pantalla y la suspensión del equipo.
 - Colocar el acceso directo en la carpeta de inicio de Windows.
-- Las tarjetas y alarmas se actualizan solas: no hace falta recargar la página.
-- El historial se consulta con el botón **Consultar** cuando se necesite.
+- Las tarjetas, alarmas y el historial **En vivo** se actualizan solos: no hace
+  falta recargar la página.
+- El historial pasa a **Histórico** cuando se consulta una página o un rango
+  pasado; al pulsar **24 h** vuelve al presente.
 - La tecla `F` o el botón de la cabecera activan pantalla completa.
 
 El panel está pensado para 16:9 y también se adapta a tabletas y teléfonos, aunque
@@ -175,19 +191,21 @@ en esos tamaños la información se apila y requiere desplazamiento.
 - Última lectura: cada **10 s**.
 - Mínimos, máximos y mini-tendencias de las tarjetas: cada **60 s**.
 - Edad de la lectura y reloj: cada **1 s**.
-- Historial: se consulta con el botón **Consultar** y se pagina de 100 en 100.
+- Historial **En vivo**: cada **30 s** en la primera página.
+- Historial **Histórico**: queda fijo hasta que se pulse **Consultar** o **24 h**.
 - Si una consulta falla, conserva el último dato y reintenta automáticamente.
-- A los **45 s** sin lectura nueva avisa; a los **3 min** declara **Sin señal**.
+- A los **45 s** sin lectura nueva avisa; a los **3 min** declara **Falla · sin datos**.
 
-Todos estos valores se cambian en `js/config.js` (`actualizacion` y `frescura`).
+Todos estos valores se cambian en `js/config.js` (`actualizacion`, `historial` y
+`frescura`).
 
 ## Diagnóstico rápido
 
 | Síntoma | Qué revisar |
 |---|---|
 | **Sin conexión** | Clave `anon`, URL del proyecto, nombre de la tabla y políticas RLS |
-| **Sin señal del equipo** | Energía y WiFi del ESP32; última fila en Supabase |
-| **No aparecen datos históricos** | RLS de `select` y que `created_at` esté en UTC |
+| **Falla · sin datos** | Energía o conexión del ESP32; última fila en Supabase |
+| **No aparecen datos históricos** | RLS de `select`, que `created_at` esté en UTC y que el rango elegido tenga lecturas; pruebe **24 h** o **7 días** |
 | **Las horas no coinciden** | `zonaHoraria` en `js/config.js` (por defecto `America/Caracas`) |
 | **Todo sale gris** | Los nombres de columna no coinciden con `canales` en `js/config.js` |
 
@@ -201,14 +219,17 @@ https://SU-PROYECTO.supabase.co/rest/v1/lecturas_hvac?select=*&order=created_at.
 
 - **Cambiar el nombre del cliente o la planta:** `cliente`, `planta`.
 - **Cambiar un límite:** `aviso` y `max` del canal correspondiente.
-- **Añadir otro canal a una tarjeta:** agregue el objeto al arreglo `canales` con
-  `principal: true` y su `id` igual al nombre de la columna en Supabase.
+- **Añadir otro canal a una tarjeta principal:** agregue el objeto al arreglo
+  `canales` con `principal: true` y su `id` igual al nombre de la columna en Supabase.
+- **Añadir una tarjeta compacta:** use `principal: false`, `tarjeta: true` y
+  `compacta: true`; aparece en la segunda fila de tarjetas.
 - **Añadir una columna al historial:** agregue el canal al arreglo `canales`;
   la tabla toma automáticamente todos los canales configurados.
 - **Cambiar la ventana de las mini-tendencias:** `actualizacion.ventanaHoras`.
-- **Cambiar filas por página o rango inicial del historial:** `historial.porPagina`
-  y `historial.horasPorDefecto`.
+- **Cambiar filas por página, rango inicial o refresco del historial:**
+  `historial.porPagina`, `historial.horasPorDefecto` y `historial.autoMs`.
 - **Mostrar el teléfono del técnico:** `contacto.telefono`.
 
-Si cambia la cantidad de tarjetas principales, revise la rejilla en
-`css/estilos.css` (`.kpis` usa cuatro columnas en escritorio).
+Si cambia la cantidad de tarjetas, revise la rejilla en `css/estilos.css`:
+`.kpis` usa 12 columnas en escritorio, las principales ocupan 3 y las compactas 4.
+En pantallas pequeñas se acomodan de a dos.

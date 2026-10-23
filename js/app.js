@@ -20,7 +20,7 @@
 
   const CANALES = Array.isArray(CFG.canales) ? CFG.canales : [];
   const PRINCIPALES = CANALES.filter((c) => c.principal);
-  const SECUNDARIOS = CANALES.filter((c) => !c.principal);
+  const TARJETAS = CANALES.filter((c) => c.principal || c.tarjeta);
 
   const VENTANA_MS = (CFG.actualizacion.ventanaHoras || 2) * 3600 * 1000;
   const AVISO_MS = CFG.frescura.avisoMs;
@@ -29,7 +29,7 @@
   const REPOSO_AVISO_MS = CFG.equipo.reposoAvisoMin * 60000;
   const REPOSO_FALLA_MS = CFG.equipo.reposoFallaMin * 60000;
   const CICLOS = CFG.equipo.ciclos;
-  const HIST = CFG.historial || { porPagina: 100, horasPorDefecto: 2 };
+  const HIST = CFG.historial || { porPagina: 100, horasPorDefecto: 24, autoMs: 30000 };
 
   /* ------------------------------- ESTADO --------------------------------- */
 
@@ -52,7 +52,10 @@
     filas: [],
     cargando: false,
     error: null,
-    solicitud: 0
+    errorConexion: false,
+    solicitud: 0,
+    firma: '',
+    actualizado: null
   };
 
   /* ------------------------------ UTILIDADES ------------------------------ */
@@ -196,8 +199,8 @@
       lista.push({
         nivel: 'critico',
         titulo: 'El equipo dejó de enviar datos',
-        detalle: 'La última lectura llegó ' + hace(edad) + '.',
-        accion: 'Verifique que el equipo tenga energía y WiFi. Avisar al técnico.'
+        detalle: 'No llegan lecturas nuevas.',
+        accion: 'Revisar energía o conexión del equipo. Avisar al técnico.'
       });
       return lista;
     }
@@ -206,7 +209,7 @@
       lista.push({
         nivel: 'aviso',
         titulo: 'Lecturas atrasadas',
-        detalle: 'La última lectura llegó ' + hace(edad) + '.',
+        detalle: 'No llegan lecturas nuevas.',
         accion: 'Espere unos segundos. Si sigue así, avise al técnico.'
       });
     }
@@ -259,6 +262,8 @@
       }
     });
 
+    if (edad <= AVISO_MS) analizarPresiones(lista);
+
     lista.sort((a, b) => (a.nivel === b.nivel ? 0 : a.nivel === 'critico' ? -1 : 1));
     return lista;
   }
@@ -285,8 +290,9 @@
 
     if (edad > CRITICO_MS) {
       return {
-        clase: 'critico', icono: '!', titulo: 'Sin señal del equipo',
-        detalle: 'La última lectura llegó ' + hace(edad) + '. Revise energía y WiFi del equipo.'
+        clase: 'critico', icono: '!', titulo: 'Falla · sin datos',
+        detalle: 'El equipo dejó de enviar datos.',
+        accion: 'Revisar energía o conexión del equipo.'
       };
     }
 
@@ -309,7 +315,7 @@
     if (edad > AVISO_MS) {
       return {
         clase: 'aviso', icono: '!', titulo: 'Lecturas atrasadas',
-        detalle: 'La última lectura llegó ' + hace(edad) + '. Espere unos segundos.'
+        detalle: 'No llegan lecturas nuevas.'
       };
     }
 
@@ -339,7 +345,9 @@
   /* ---------------------------- EQUIPO / SEÑAL ---------------------------- */
 
   function calcularEquipo() {
-    if (!estado.fila) return { estado: 'desconocido', detenido: false };
+    if (!estado.fila || edadMs() > AVISO_MS) {
+      return { estado: 'desconocido', detenido: false };
+    }
     const baja = estado.fila.presion_baja;
     const alta = estado.fila.presion_alta;
     if (!Number.isFinite(baja) || !Number.isFinite(alta)) {
@@ -350,6 +358,99 @@
       estado: diferencial >= DIF_MARCHA ? 'marcha' : 'detenido',
       detenido: diferencial < DIF_MARCHA
     };
+  }
+
+  function esMarcha(fila) {
+    if (!fila) return null;
+    const alta = fila.presion_alta;
+    const baja = fila.presion_baja;
+    if (!Number.isFinite(alta) || !Number.isFinite(baja)) return null;
+    return (alta - baja) >= DIF_MARCHA;
+  }
+
+  function analizarPresiones(lista) {
+    const filas = estado.historial;
+    if (!filas.length) return;
+
+    const equipo = calcularEquipo();
+
+    if (equipo.estado === 'detenido') {
+      let inicio = null;
+      let anterior = null;
+      for (let i = filas.length - 1; i >= 0; i--) {
+        const t = new Date(filas[i].created_at).getTime();
+        if (!Number.isFinite(t)) break;
+        if (anterior !== null && anterior - t > 5 * 60000) break;
+        anterior = t;
+
+        const marcha = esMarcha(filas[i]);
+        if (marcha === false) {
+          inicio = t;
+        } else {
+          break;
+        }
+      }
+
+      if (inicio !== null) {
+        const duracion = Date.now() - inicio;
+        if (duracion >= REPOSO_FALLA_MS) {
+          lista.push({
+            nivel: 'critico',
+            titulo: 'Equipo detenido demasiado tiempo',
+            detalle: 'Las presiones llevan ' + duracionTexto(duracion) + ' igualadas.',
+            accion: 'Revisar el equipo. Puede estar detenido por una falla.'
+          });
+        } else if (duracion >= REPOSO_AVISO_MS) {
+          lista.push({
+            nivel: 'aviso',
+            titulo: 'Equipo detenido hace ' + duracionTexto(duracion),
+            detalle: 'Las presiones están igualadas.',
+            accion: 'Vigilar el equipo. Si no arranca, avise al técnico.'
+          });
+        }
+      }
+    }
+
+    const desde = Date.now() - CICLOS.ventanaMin * 60000;
+    const paradas = [];
+    let inicioParada = null;
+    let ultimaFecha = null;
+
+    filas.forEach((fila) => {
+      const t = new Date(fila.created_at).getTime();
+      if (!Number.isFinite(t)) return;
+      if (ultimaFecha !== null && t - ultimaFecha > 5 * 60000) {
+        inicioParada = null;
+      }
+      ultimaFecha = t;
+
+      const marcha = esMarcha(fila);
+      if (marcha === null) {
+        inicioParada = null;
+        return;
+      }
+
+      if (!marcha && inicioParada === null) {
+        inicioParada = t;
+      } else if (marcha && inicioParada !== null) {
+        const duracion = t - inicioParada;
+        if (duracion >= CICLOS.cortoMinMin * 60000 &&
+            duracion < CICLOS.cortoMaxMin * 60000) {
+          paradas.push({ fin: t });
+        }
+        inicioParada = null;
+      }
+    });
+
+    const recientes = paradas.filter((p) => p.fin >= desde);
+    if (recientes.length >= CICLOS.minimo) {
+      lista.push({
+        nivel: 'aviso',
+        titulo: 'Arranques y paradas repetidas',
+        detalle: recientes.length + ' paradas cortas en la última hora.',
+        accion: 'Avisar al técnico: puede ser una fuga o un presostato mal regulado.'
+      });
+    }
   }
 
   function clasificarSenal(rssi) {
@@ -546,7 +647,6 @@
       }
 
       pintarValores();
-      pintarEquipo();
       tick();
     } catch (error) {
       estado.error = mensajeError(error);
@@ -583,11 +683,14 @@
     contenedor.innerHTML = '';
     tarjetas = {};
 
-    PRINCIPALES.forEach((canal) => {
+    TARJETAS.forEach((canal) => {
       const articulo = document.createElement('article');
-      articulo.className = 'kpi';
+      articulo.className = 'kpi' + (canal.compacta ? ' compacta' : '');
       articulo.dataset.kpi = canal.id;
       articulo.style.setProperty('--color', canal.color);
+      const pieEtiqueta = (canal.max != null || canal.min != null)
+        ? textoLimite(canal)
+        : 'Tendencia 2 h';
       articulo.innerHTML =
         '<div class="kpi-cabecera">' +
           '<span class="kpi-nombre">' + escapar(canal.nombre) + '</span>' +
@@ -602,7 +705,7 @@
           '<span>Máx. 2 h <b>—</b></span>' +
         '</div>' +
         '<div class="kpi-pie">' +
-          '<span class="kpi-limite">' + textoLimite(canal) + '</span>' +
+          '<span class="kpi-limite">' + escapar(pieEtiqueta) + '</span>' +
           '<canvas class="sparkline" aria-hidden="true"></canvas>' +
         '</div>';
 
@@ -628,7 +731,7 @@
   }
 
   function pintarValores() {
-    PRINCIPALES.forEach((canal) => {
+    TARJETAS.forEach((canal) => {
       const ref = tarjetas[canal.id];
       if (!ref) return;
       const valor = estado.fila ? estado.fila[canal.id] : null;
@@ -655,6 +758,21 @@
       valores[1].textContent = Number.isFinite(maximo) ? numero(maximo, canal.decimales) : '—';
 
       dibujarSparkline(ref.lienzo, canal);
+    });
+
+    marcarTarjetasObsoletas();
+  }
+
+  function marcarTarjetasObsoletas() {
+    const obsoleto = !estado.fila || edadMs() > AVISO_MS;
+    TARJETAS.forEach((canal) => {
+      const ref = tarjetas[canal.id];
+      if (!ref) return;
+      ref.articulo.classList.toggle('obsoleto', obsoleto);
+      if (obsoleto) {
+        ref.estado.textContent = 'Sin dato';
+        ref.estado.className = 'kpi-estado neutro';
+      }
     });
   }
 
@@ -745,6 +863,14 @@
     $('bannerIcono').textContent = estadoActual.icono;
     $('bannerTitulo').textContent = estadoActual.titulo;
     $('bannerDetalle').textContent = estadoActual.detalle;
+    const accion = $('bannerAccion');
+    if (estadoActual.accion) {
+      accion.textContent = estadoActual.accion;
+      accion.hidden = false;
+    } else {
+      accion.hidden = true;
+      accion.textContent = '';
+    }
     $('txtEdad').textContent = estado.fila ? hace(edad) : '—';
     $('txtHoraUltima').textContent = fecha
       ? capitalizar(FMT_FECHA.format(fecha)) + ' · ' + horaDe(fecha)
@@ -757,72 +883,45 @@
   function pintarChip() {
     const chip = $('chipConexion');
     const text = $('txtConexion');
+    const senalTexto = $('senalTexto');
+    const barras = $('senalBarras');
+    const fila = estado.fila;
+    const edad = edadMs();
     let clase = 'neutro';
-    let mensaje = 'Conectando…';
+    let mensaje = 'Conectando';
+    let detalle = 'Esperando la primera lectura del equipo.';
 
-    if (estado.error && !estado.fila) {
+    if (estado.error) {
       clase = 'critico';
-      mensaje = esErrorDeRed(estado.error) ? 'Sin conexión' : 'Sin datos';
-    } else if (estado.error) {
-      clase = 'aviso'; mensaje = 'Reintentando…';
-    } else if (estado.fila && edadMs() <= AVISO_MS) {
-      clase = 'ok'; mensaje = 'Datos al día';
-    } else if (estado.fila) {
-      clase = 'aviso'; mensaje = 'Datos atrasados';
+      mensaje = 'Error';
+      detalle = estado.error;
+    } else if (!fila) {
+      clase = 'neutro';
+      mensaje = 'Conectando';
+    } else if (edad <= AVISO_MS) {
+      clase = 'ok';
+      mensaje = 'Conectado';
+      detalle = 'El equipo está enviando datos.';
+    } else if (edad <= CRITICO_MS) {
+      clase = 'aviso';
+      mensaje = 'Falla';
+      detalle = 'Lecturas atrasadas.';
+    } else {
+      clase = 'critico';
+      mensaje = 'Falla';
+      detalle = 'Falla: sin datos del equipo.';
     }
 
     chip.className = 'chip-conexion ' + clase;
+    chip.title = detalle;
     text.textContent = mensaje;
-  }
 
-  function pintarEquipo() {
-    const chip = $('chipEquipo');
-    const info = calcularEquipo();
-    const fila = estado.fila;
-
-    if (!fila) {
-      chip.className = 'chip-equipo neutro';
-      chip.textContent = 'Sin datos';
-    } else if (info.estado === 'marcha') {
-      chip.className = 'chip-equipo ok';
-      chip.textContent = 'En marcha';
-    } else if (info.estado === 'detenido') {
-      chip.className = 'chip-equipo neutro';
-      chip.textContent = 'En reposo';
-    } else {
-      chip.className = 'chip-equipo neutro';
-      chip.textContent = 'Sin datos';
-    }
-
-    const senal = clasificarSenal(fila ? fila.rssi : null);
-    const senalTexto = $('senalTexto');
-    const tieneSenal = Number.isFinite(fila && fila.rssi);
+    const tieneSenal = Boolean(fila) && edad <= AVISO_MS && Number.isFinite(fila.rssi);
+    const senal = clasificarSenal(tieneSenal ? fila.rssi : null);
     senalTexto.textContent = tieneSenal ? senal.texto : 'Sin dato';
-    senalTexto.title = tieneSenal ? 'Señal WiFi: ' + Math.round(fila.rssi) + ' dBm' : '';
-    senalTexto.className = 'senal ' + senal.nivel;
-
-    const barras = $('senalBarras');
-    barras.className = 'barras' + (senal.barras ? ' n' + senal.barras : '');
-
-    actualizarUltima();
-
-    const lista = $('otrasLecturas');
-    lista.innerHTML = SECUNDARIOS.map((canal) => {
-      const valor = fila ? fila[canal.id] : null;
-      const clasificacion = clasificarCanal(canal, valor);
-      return '<li><span>' + escapar(canal.nombre) + '</span>' +
-        '<b class="' + clasificacion.nivel + '">' +
-        (Number.isFinite(valor) ? textoValor(canal, valor) : '—') +
-        '</b></li>';
-    }).join('');
-  }
-
-  function actualizarUltima() {
-    const fila = estado.fila;
-    const fecha = fechaDe(fila);
-    $('equipoUltima').textContent = fecha
-      ? horaDe(fecha) + ' · ' + hace(edadMs())
-      : '—';
+    senalTexto.title = tieneSenal ? 'Señal: ' + Math.round(fila.rssi) + ' dBm' : 'Sin dato de señal';
+    senalTexto.className = 'senal ' + (tieneSenal ? senal.nivel : 'neutro');
+    barras.className = 'barras' + (tieneSenal && senal.barras ? ' n' + senal.barras : '');
   }
 
   /* ------------------------------- HISTORIAL ------------------------------ */
@@ -853,11 +952,24 @@
     const columnas = CANALES.length + 2;
 
     if (!tablaHistorial.filas.length) {
-      const mensaje = tablaHistorial.error
-        ? 'No se pudo cargar el historial.'
-        : 'No hay lecturas en este rango.';
+      if (tablaHistorial.error) {
+        cuerpo.innerHTML = '<tr><td class="tabla-vacia" colspan="' + columnas + '">' +
+          '<div class="vacio-titulo">No se pudo cargar el historial</div>' +
+          '<div class="vacio-texto">' + escapar(tablaHistorial.error) + '</div>' +
+          '<button type="button" class="btn-vacio" data-reintentar="1">Reintentar</button>' +
+          '</td></tr>';
+        return;
+      }
+
+      const ultima = estado.fila ? fechaHoraDe(fechaDe(estado.fila)) : null;
+      const detalle = ultima
+        ? 'La última lectura fue ' + ultima + ' (' + hace(edadMs()) + ').'
+        : 'Todavía no hay lecturas registradas.';
       cuerpo.innerHTML = '<tr><td class="tabla-vacia" colspan="' + columnas + '">' +
-        escapar(mensaje) + '</td></tr>';
+        '<div class="vacio-titulo">No hay lecturas en este rango</div>' +
+        '<div class="vacio-texto">' + escapar(detalle) + '</div>' +
+        '<button type="button" class="btn-vacio" data-ir-rango="24">Ver últimas 24 h</button>' +
+        '</td></tr>';
       return;
     }
 
@@ -880,25 +992,64 @@
     }).join('');
   }
 
+  function rangoEnVivo() {
+    if (!tablaHistorial.hasta) return false;
+    return Math.abs(Date.now() - tablaHistorial.hasta.getTime()) <= 2 * 60000;
+  }
+
+  function actualizarModoHistorial() {
+    const modo = $('historialModo');
+    if (!modo) return;
+
+    if (tablaHistorial.errorConexion) {
+      modo.textContent = 'Sin conexión';
+      modo.classList.remove('vivo');
+      modo.title = 'No se pudo consultar Supabase. Se reintentará automáticamente.';
+      return;
+    }
+
+    const vivo = rangoEnVivo() && tablaHistorial.pagina === 0 && !tablaHistorial.error;
+    modo.textContent = vivo ? 'En vivo' : 'Histórico';
+    modo.classList.toggle('vivo', vivo);
+    modo.title = vivo
+      ? 'Actualización automática cada ' + Math.round((HIST.autoMs || 30000) / 1000) + ' s'
+      : 'Rango histórico: use 24 h o vuelva a consultar para regresar al presente';
+  }
+
   function actualizarInfoHistorial(mensaje) {
     const info = $('historialInfo');
     const rangoInfo = $('tablaRangoInfo');
+    const actualizado = $('tablaActualizado');
 
     if (mensaje) {
       info.textContent = mensaje;
       rangoInfo.textContent = '—';
+      actualizado.textContent = '—';
+      const modo = $('historialModo');
+      if (modo) {
+        modo.textContent = 'Consultando';
+        modo.classList.remove('vivo');
+      }
       return;
     }
 
+    actualizarModoHistorial();
+
     if (tablaHistorial.error) {
-      info.textContent = 'No se pudo cargar: ' + tablaHistorial.error;
-      rangoInfo.textContent = '—';
+      const accion = tablaHistorial.filas.length ? 'actualizar' : 'cargar';
+      info.textContent = 'No se pudo ' + accion + ': ' + tablaHistorial.error +
+        (tablaHistorial.filas.length ? ' · se muestran los últimos datos.' : '');
+      rangoInfo.textContent = tablaHistorial.filas.length ? 'Datos anteriores' : '—';
+      actualizado.textContent = (tablaHistorial.filas.length && tablaHistorial.actualizado)
+        ? 'Actualizado ' + horaDe(tablaHistorial.actualizado)
+        : '—';
       return;
     }
 
     if (!tablaHistorial.desde || !tablaHistorial.hasta) {
       info.textContent = 'Seleccione un rango y pulse Consultar.';
       rangoInfo.textContent = '—';
+      actualizado.textContent = '—';
       return;
     }
 
@@ -908,6 +1059,7 @@
     if (!tablaHistorial.filas.length) {
       info.textContent = 'Sin lecturas entre ' + desde + ' y ' + hasta + '.';
       rangoInfo.textContent = '0 lecturas';
+      actualizado.textContent = 'Consultado ' + horaDe(new Date());
       return;
     }
 
@@ -921,6 +1073,8 @@
     rangoInfo.textContent = total != null
       ? 'Mostrando ' + inicio + '–' + fin + ' de ' + total.toLocaleString('es-VE')
       : 'Mostrando ' + tablaHistorial.filas.length + ' lecturas';
+
+    actualizado.textContent = 'Actualizado ' + horaDe(tablaHistorial.actualizado || new Date());
   }
 
   function actualizarPaginacion() {
@@ -932,7 +1086,7 @@
       (tablaHistorial.pagina + 1) >= paginas;
   }
 
-  async function cargarTablaHistorial(pagina, usarRangoAplicado) {
+  async function cargarTablaHistorial(pagina, usarRangoAplicado, silencioso) {
     const paginaSolicitada = Math.max(0, Number(pagina) || 0);
     let desde;
     let hasta;
@@ -948,8 +1102,10 @@
 
       if (!desde || Number.isNaN(desde.getTime()) || !hasta || Number.isNaN(hasta.getTime())) {
         tablaHistorial.error = 'Indique una fecha y hora válidas.';
+        tablaHistorial.errorConexion = false;
         tablaHistorial.filas = [];
         tablaHistorial.total = null;
+        tablaHistorial.firma = '';
         pintarTablaHistorial();
         actualizarInfoHistorial();
         actualizarPaginacion();
@@ -962,8 +1118,10 @@
 
     if (desde >= hasta) {
       tablaHistorial.error = 'La fecha "Desde" debe ser anterior a "Hasta".';
+      tablaHistorial.errorConexion = false;
       tablaHistorial.filas = [];
       tablaHistorial.total = null;
+      tablaHistorial.firma = '';
       pintarTablaHistorial();
       actualizarInfoHistorial();
       actualizarPaginacion();
@@ -973,8 +1131,9 @@
     const solicitud = ++tablaHistorial.solicitud;
     tablaHistorial.cargando = true;
     tablaHistorial.error = null;
-    $('btnConsultar').disabled = true;
-    actualizarInfoHistorial('Consultando lecturas…');
+    tablaHistorial.errorConexion = false;
+    if (!silencioso) $('btnConsultar').disabled = true;
+    if (!silencioso) actualizarInfoHistorial('Consultando lecturas…');
     actualizarPaginacion();
 
     try {
@@ -984,28 +1143,43 @@
       );
       if (solicitud !== tablaHistorial.solicitud) return;
 
+      const filas = (resultado.filas || [])
+        .map(limpiarFila)
+        .filter((fila) => fila && fila.created_at);
+      const total = Number.isFinite(resultado.total) ? resultado.total : null;
+      const firma = (total != null ? total : '') + '|' +
+        filas.map((fila) => fila.created_at).join('|');
+
       tablaHistorial.desde = desde;
       tablaHistorial.hasta = hasta;
       tablaHistorial.pagina = paginaSolicitada;
-      tablaHistorial.total = Number.isFinite(resultado.total) ? resultado.total : null;
-      tablaHistorial.filas = (resultado.filas || [])
-        .map(limpiarFila)
-        .filter((fila) => fila && fila.created_at);
+      tablaHistorial.total = total;
+      tablaHistorial.filas = filas;
+      tablaHistorial.actualizado = new Date();
 
-      pintarTablaHistorial();
+      if (!silencioso || firma !== tablaHistorial.firma) {
+        pintarTablaHistorial();
+      }
+      tablaHistorial.firma = firma;
       actualizarInfoHistorial();
     } catch (error) {
       if (solicitud !== tablaHistorial.solicitud) return;
       tablaHistorial.error = mensajeError(error);
-      tablaHistorial.filas = [];
-      tablaHistorial.total = null;
-      pintarTablaHistorial();
+      tablaHistorial.errorConexion = true;
+
+      if (!silencioso) {
+        tablaHistorial.filas = [];
+        tablaHistorial.total = null;
+        tablaHistorial.firma = '';
+      }
+      if (!silencioso || !tablaHistorial.filas.length) pintarTablaHistorial();
       actualizarInfoHistorial();
     } finally {
       if (solicitud === tablaHistorial.solicitud) {
         tablaHistorial.cargando = false;
         $('btnConsultar').disabled = false;
         actualizarPaginacion();
+        actualizarModoHistorial();
       }
     }
   }
@@ -1016,27 +1190,70 @@
     });
   }
 
+  function puedeAutoRefrescar() {
+    if (document.hidden || tablaHistorial.cargando) return false;
+    if (tablaHistorial.pagina !== 0) return false;
+    if (!rangoEnVivo()) return false;
+    const caja = document.querySelector('.tabla-caja');
+    return !caja || caja.scrollTop < 24;
+  }
+
+  async function refrescarHistorialEnVivo() {
+    if (!tablaHistorial.desde || !tablaHistorial.hasta) return;
+
+    const duracion = Math.max(
+      60000,
+      tablaHistorial.hasta.getTime() - tablaHistorial.desde.getTime()
+    );
+    const fin = new Date();
+    const inicio = new Date(fin.getTime() - duracion);
+
+    $('histDesde').value = valorParaInput(inicio);
+    $('histHasta').value = valorParaInput(fin);
+    tablaHistorial.desde = inicio;
+    tablaHistorial.hasta = fin;
+
+    await cargarTablaHistorial(0, true, true);
+  }
+
+  function aplicarRangoHoras(horas) {
+    const fin = new Date();
+    const inicio = new Date(fin.getTime() - horas * 3600000);
+
+    $('histDesde').value = valorParaInput(inicio);
+    $('histHasta').value = valorParaInput(fin);
+    marcarRangoActivo(document.querySelector('.btn-rango[data-horas="' + horas + '"]'));
+    cargarTablaHistorial(0);
+  }
+
   function conectarFiltroHistorial() {
     const ahora = new Date();
-    const horas = Number(HIST.horasPorDefecto) || 2;
+    const horas = Number(HIST.horasPorDefecto) || 24;
 
     $('histDesde').value = valorParaInput(new Date(ahora.getTime() - horas * 3600000));
     $('histHasta').value = valorParaInput(ahora);
 
     $('filtroHistorial').addEventListener('submit', (evento) => {
       evento.preventDefault();
+      marcarRangoActivo(null);
       cargarTablaHistorial(0);
     });
 
     document.querySelectorAll('.btn-rango').forEach((boton) => {
       boton.addEventListener('click', () => {
-        const horasRango = Number(boton.dataset.horas) || 2;
-        const fin = new Date();
-        $('histDesde').value = valorParaInput(new Date(fin.getTime() - horasRango * 3600000));
-        $('histHasta').value = valorParaInput(fin);
-        marcarRangoActivo(boton);
-        cargarTablaHistorial(0);
+        aplicarRangoHoras(Number(boton.dataset.horas) || 24);
       });
+    });
+
+    $('historialCuerpo').addEventListener('click', (evento) => {
+      const irARango = evento.target.closest('[data-ir-rango]');
+      if (irARango) {
+        aplicarRangoHoras(Number(irARango.dataset.irRango) || 24);
+        return;
+      }
+      if (evento.target.closest('[data-reintentar]')) {
+        cargarTablaHistorial(tablaHistorial.pagina, true);
+      }
     });
 
     $('btnPaginaAnterior').addEventListener('click', () => {
@@ -1168,7 +1385,7 @@
 
     pintarBanner();
     pintarChip();
-    actualizarUltima();
+    marcarTarjetasObsoletas();
   }
 
   /* ------------------------------- INICIO --------------------------------- */
@@ -1220,7 +1437,7 @@
       pendiente = true;
       window.requestAnimationFrame(() => {
         pendiente = false;
-        PRINCIPALES.forEach((canal) => {
+        TARJETAS.forEach((canal) => {
           const ref = tarjetas[canal.id];
           if (ref) dibujarSparkline(ref.lienzo, canal);
         });
@@ -1249,13 +1466,16 @@
     setInterval(cargarUltima, CFG.actualizacion.ultimaMs);
     setInterval(cargarHistorial, CFG.actualizacion.historialMs);
     setInterval(tick, 1000);
+    setInterval(() => {
+      if (puedeAutoRefrescar()) refrescarHistorialEnVivo();
+    }, Math.max(10000, Number(HIST.autoMs) || 30000));
 
     document.addEventListener('visibilitychange', () => {
       if (!document.hidden) {
         cargarUltima();
         cargarHistorial();
-        if (tablaHistorial.hasta && (Date.now() - tablaHistorial.hasta.getTime()) < 300000) {
-          cargarTablaHistorial(tablaHistorial.pagina, true);
+        if (rangoEnVivo() && tablaHistorial.pagina === 0) {
+          refrescarHistorialEnVivo();
         }
       }
     });
