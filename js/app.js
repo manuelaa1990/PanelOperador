@@ -2,7 +2,7 @@
    PANEL DE SUPERVISIÓN · LÓGICA
    ----------------------------------------------------------------------------
    - Lee la última lectura y las últimas 2 horas desde Supabase (PostgREST).
-   - Pinta tarjetas grandes, alarmas en lenguaje sencillo y dos gráficas.
+   - Pinta tarjetas grandes, alarmas en lenguaje sencillo e historial consultable.
    - Reintenta sola cada 10 s; nunca necesita que el vigilante recargue.
    - Con ?demo=1 funciona sin Supabase (útil para probar la pantalla).
    - Con ?demo=1&alarma=1 muestra una alarma de ejemplo.
@@ -19,9 +19,6 @@
   const DEMO_AVISO = PARAMS.get('aviso') === '1';
 
   const CANALES = Array.isArray(CFG.canales) ? CFG.canales : [];
-  const CANAL_POR_ID = {};
-  CANALES.forEach((c) => { CANAL_POR_ID[c.id] = c; });
-
   const PRINCIPALES = CANALES.filter((c) => c.principal);
   const SECUNDARIOS = CANALES.filter((c) => !c.principal);
 
@@ -32,6 +29,7 @@
   const REPOSO_AVISO_MS = CFG.equipo.reposoAvisoMin * 60000;
   const REPOSO_FALLA_MS = CFG.equipo.reposoFallaMin * 60000;
   const CICLOS = CFG.equipo.ciclos;
+  const HIST = CFG.historial || { porPagina: 100, horasPorDefecto: 2 };
 
   /* ------------------------------- ESTADO --------------------------------- */
 
@@ -43,6 +41,18 @@
     firmaResumen: '',
     alarmas: [],
     ultimaCarga: 0
+  };
+
+  const tablaHistorial = {
+    desde: null,
+    hasta: null,
+    pagina: 0,
+    porPagina: Math.max(10, Number(HIST.porPagina) || 100),
+    total: null,
+    filas: [],
+    cargando: false,
+    error: null,
+    solicitud: 0
   };
 
   /* ------------------------------ UTILIDADES ------------------------------ */
@@ -115,12 +125,27 @@
   }
 
   const FMT_HORA = enZona({ hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' });
-  const FMT_HORA_CORTA = enZona({ hour: '2-digit', minute: '2-digit', hourCycle: 'h23' });
   const FMT_FECHA = enZona({ weekday: 'long', day: 'numeric', month: 'long' });
+  const FMT_FECHA_HORA = enZona({
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'
+  });
 
   function horaDe(fecha) {
     if (!fecha) return '—';
     return FMT_HORA.format(fecha);
+  }
+
+  function fechaHoraDe(fecha) {
+    if (!fecha) return '—';
+    return FMT_FECHA_HORA.format(fecha);
+  }
+
+  function valorParaInput(fecha) {
+    const d = new Date(fecha);
+    const dos = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + '-' + dos(d.getMonth() + 1) + '-' + dos(d.getDate()) +
+      'T' + dos(d.getHours()) + ':' + dos(d.getMinutes());
   }
 
   function capitalizar(texto) {
@@ -366,7 +391,7 @@
     return /conexión|conexion|tardó|tardo|Failed to fetch|NetworkError|Load failed/i.test(String(texto || ''));
   }
 
-  async function pedirSupabase(consulta) {
+  async function pedirSupabase(consulta, opciones) {
     const sb = CFG.supabase;
     if (!sb.clave || String(sb.clave).length < 20) {
       throw new Error('Falta configurar la clave pública de Supabase en js/config.js.');
@@ -374,21 +399,30 @@
 
     const url = sb.url.replace(/\/$/, '') + '/rest/v1/' + sb.tabla + '?' + consulta;
     const control = new AbortController();
-    const limite = setTimeout(() => control.abort(), 8000);
+    const limite = setTimeout(() => control.abort(), 12000);
+    const cabeceras = {
+      apikey: sb.clave,
+      Authorization: 'Bearer ' + sb.clave,
+      Accept: 'application/json'
+    };
+    if (opciones && opciones.conTotal) cabeceras.Prefer = 'count=exact';
 
     try {
       const respuesta = await fetch(url, {
-        headers: {
-          apikey: sb.clave,
-          Authorization: 'Bearer ' + sb.clave,
-          Accept: 'application/json'
-        },
+        headers: cabeceras,
         cache: 'no-store',
         signal: control.signal
       });
       if (!respuesta.ok) throw new Error('HTTP ' + respuesta.status);
       const datos = await respuesta.json();
-      return Array.isArray(datos) ? datos : [];
+      const filas = Array.isArray(datos) ? datos : [];
+
+      if (opciones && opciones.conTotal) {
+        const contentRange = respuesta.headers.get('content-range') || '';
+        const total = Number(contentRange.split('/')[1]);
+        return { filas: filas, total: Number.isFinite(total) ? total : null };
+      }
+      return filas;
     } finally {
       clearTimeout(limite);
     }
@@ -443,6 +477,24 @@
       historial: async function () {
         avanzar();
         return filas.slice();
+      },
+      rango: function (desde, hasta) {
+        const inicio = desde.getTime();
+        const fin = hasta.getTime();
+        const maximo = 2000;
+        const paso = Math.max(15000, Math.ceil((fin - inicio) / maximo));
+        const resultado = [];
+        for (let t = fin; t >= inicio && resultado.length < maximo; t -= paso) {
+          resultado.push(filaDemo(t));
+        }
+        return resultado;
+      },
+      historialRango: async function (desde, hasta, offset, limite) {
+        const todas = this.rango(desde, hasta);
+        return {
+          filas: todas.slice(offset, offset + limite),
+          total: todas.length
+        };
       }
     };
   })();
@@ -457,6 +509,15 @@
         'select=created_at,presion_baja,presion_alta,temp1,temp2,temp3,temp4,temp5,rssi,wifi,ip' +
         '&created_at=gte.' + encodeURIComponent(desde) +
         '&order=created_at.asc&limit=2000'
+      );
+    },
+    historialRango: function (desde, hasta, offset, limite) {
+      return pedirSupabase(
+        'select=created_at,presion_baja,presion_alta,temp1,temp2,temp3,temp4,temp5,rssi,wifi,ip' +
+        '&created_at=gte.' + encodeURIComponent(desde.toISOString()) +
+        '&created_at=lte.' + encodeURIComponent(hasta.toISOString()) +
+        '&order=created_at.desc&limit=' + limite + '&offset=' + offset,
+        { conTotal: true }
       );
     }
   };
@@ -486,7 +547,6 @@
 
       pintarValores();
       pintarEquipo();
-      pintarGraficas();
       tick();
     } catch (error) {
       estado.error = mensajeError(error);
@@ -506,11 +566,10 @@
             estado.historial.push(estado.fila);
           }
         }
-        pintarGraficas();
         pintarValores();
       }
     } catch (error) {
-      // La gráfica conserva lo último que tenía; la cabecera ya avisa del fallo.
+      // Las tarjetas conservan lo último que tenían; la cabecera avisa del fallo.
       console.warn('No se pudo refrescar el historial:', error);
     }
   }
@@ -766,7 +825,238 @@
       : '—';
   }
 
-  /* ------------------------------- GRÁFICAS ------------------------------- */
+  /* ------------------------------- HISTORIAL ------------------------------ */
+
+  function crearCabeceraHistorial() {
+    $('historialCabecera').innerHTML =
+      '<tr><th>Fecha y hora</th><th>Equipo</th>' +
+      CANALES.map((canal) =>
+        '<th>' + escapar(canal.corto) +
+        '<small>' + escapar(canal.unidad) + '</small></th>'
+      ).join('') +
+      '</tr>';
+  }
+
+  function estadoDeFila(fila) {
+    const alta = fila.presion_alta;
+    const baja = fila.presion_baja;
+    if (!Number.isFinite(alta) || !Number.isFinite(baja)) {
+      return { texto: 'Sin dato', clase: 'neutro' };
+    }
+    return (alta - baja) >= DIF_MARCHA
+      ? { texto: 'Marcha', clase: 'marcha' }
+      : { texto: 'Reposo', clase: 'reposo' };
+  }
+
+  function pintarTablaHistorial() {
+    const cuerpo = $('historialCuerpo');
+    const columnas = CANALES.length + 2;
+
+    if (!tablaHistorial.filas.length) {
+      const mensaje = tablaHistorial.error
+        ? 'No se pudo cargar el historial.'
+        : 'No hay lecturas en este rango.';
+      cuerpo.innerHTML = '<tr><td class="tabla-vacia" colspan="' + columnas + '">' +
+        escapar(mensaje) + '</td></tr>';
+      return;
+    }
+
+    cuerpo.innerHTML = tablaHistorial.filas.map((fila) => {
+      const fecha = fechaDe(fila);
+      const equipo = estadoDeFila(fila);
+      const celdas = CANALES.map((canal) => {
+        const valor = fila[canal.id];
+        const clasificacion = clasificarCanal(canal, valor);
+        return '<td class="valor ' + clasificacion.nivel + '">' +
+          (Number.isFinite(valor) ? numero(valor, canal.decimales) : '—') +
+          '</td>';
+      }).join('');
+
+      return '<tr>' +
+        '<td class="fecha">' + escapar(fechaHoraDe(fecha)) + '</td>' +
+        '<td><span class="estado-fila ' + equipo.clase + '">' + equipo.texto + '</span></td>' +
+        celdas +
+        '</tr>';
+    }).join('');
+  }
+
+  function actualizarInfoHistorial(mensaje) {
+    const info = $('historialInfo');
+    const rangoInfo = $('tablaRangoInfo');
+
+    if (mensaje) {
+      info.textContent = mensaje;
+      rangoInfo.textContent = '—';
+      return;
+    }
+
+    if (tablaHistorial.error) {
+      info.textContent = 'No se pudo cargar: ' + tablaHistorial.error;
+      rangoInfo.textContent = '—';
+      return;
+    }
+
+    if (!tablaHistorial.desde || !tablaHistorial.hasta) {
+      info.textContent = 'Seleccione un rango y pulse Consultar.';
+      rangoInfo.textContent = '—';
+      return;
+    }
+
+    const desde = fechaHoraDe(tablaHistorial.desde);
+    const hasta = fechaHoraDe(tablaHistorial.hasta);
+
+    if (!tablaHistorial.filas.length) {
+      info.textContent = 'Sin lecturas entre ' + desde + ' y ' + hasta + '.';
+      rangoInfo.textContent = '0 lecturas';
+      return;
+    }
+
+    const total = tablaHistorial.total;
+    const inicio = tablaHistorial.pagina * tablaHistorial.porPagina + 1;
+    const fin = inicio + tablaHistorial.filas.length - 1;
+
+    info.textContent = (total != null ? total.toLocaleString('es-VE') : String(tablaHistorial.filas.length)) +
+      ' lecturas · ' + desde + ' → ' + hasta;
+
+    rangoInfo.textContent = total != null
+      ? 'Mostrando ' + inicio + '–' + fin + ' de ' + total.toLocaleString('es-VE')
+      : 'Mostrando ' + tablaHistorial.filas.length + ' lecturas';
+  }
+
+  function actualizarPaginacion() {
+    const total = tablaHistorial.total;
+    const paginas = total != null ? Math.max(1, Math.ceil(total / tablaHistorial.porPagina)) : 1;
+    $('paginaActual').textContent = 'Página ' + (tablaHistorial.pagina + 1) + ' de ' + paginas;
+    $('btnPaginaAnterior').disabled = tablaHistorial.cargando || tablaHistorial.pagina <= 0;
+    $('btnPaginaSiguiente').disabled = tablaHistorial.cargando || total == null ||
+      (tablaHistorial.pagina + 1) >= paginas;
+  }
+
+  async function cargarTablaHistorial(pagina, usarRangoAplicado) {
+    const paginaSolicitada = Math.max(0, Number(pagina) || 0);
+    let desde;
+    let hasta;
+
+    if (usarRangoAplicado && tablaHistorial.desde && tablaHistorial.hasta) {
+      desde = new Date(tablaHistorial.desde);
+      hasta = new Date(tablaHistorial.hasta);
+    } else {
+      const desdeValor = $('histDesde').value;
+      const hastaValor = $('histHasta').value;
+      desde = desdeValor ? new Date(desdeValor) : null;
+      hasta = hastaValor ? new Date(hastaValor) : null;
+
+      if (!desde || Number.isNaN(desde.getTime()) || !hasta || Number.isNaN(hasta.getTime())) {
+        tablaHistorial.error = 'Indique una fecha y hora válidas.';
+        tablaHistorial.filas = [];
+        tablaHistorial.total = null;
+        pintarTablaHistorial();
+        actualizarInfoHistorial();
+        actualizarPaginacion();
+        return;
+      }
+
+      // Si el rango termina ahora, incluimos también los segundos transcurridos.
+      if (Math.abs(Date.now() - hasta.getTime()) < 120000) hasta = new Date();
+    }
+
+    if (desde >= hasta) {
+      tablaHistorial.error = 'La fecha "Desde" debe ser anterior a "Hasta".';
+      tablaHistorial.filas = [];
+      tablaHistorial.total = null;
+      pintarTablaHistorial();
+      actualizarInfoHistorial();
+      actualizarPaginacion();
+      return;
+    }
+
+    const solicitud = ++tablaHistorial.solicitud;
+    tablaHistorial.cargando = true;
+    tablaHistorial.error = null;
+    $('btnConsultar').disabled = true;
+    actualizarInfoHistorial('Consultando lecturas…');
+    actualizarPaginacion();
+
+    try {
+      const offset = paginaSolicitada * tablaHistorial.porPagina;
+      const resultado = await fuente.historialRango(
+        desde, hasta, offset, tablaHistorial.porPagina
+      );
+      if (solicitud !== tablaHistorial.solicitud) return;
+
+      tablaHistorial.desde = desde;
+      tablaHistorial.hasta = hasta;
+      tablaHistorial.pagina = paginaSolicitada;
+      tablaHistorial.total = Number.isFinite(resultado.total) ? resultado.total : null;
+      tablaHistorial.filas = (resultado.filas || [])
+        .map(limpiarFila)
+        .filter((fila) => fila && fila.created_at);
+
+      pintarTablaHistorial();
+      actualizarInfoHistorial();
+    } catch (error) {
+      if (solicitud !== tablaHistorial.solicitud) return;
+      tablaHistorial.error = mensajeError(error);
+      tablaHistorial.filas = [];
+      tablaHistorial.total = null;
+      pintarTablaHistorial();
+      actualizarInfoHistorial();
+    } finally {
+      if (solicitud === tablaHistorial.solicitud) {
+        tablaHistorial.cargando = false;
+        $('btnConsultar').disabled = false;
+        actualizarPaginacion();
+      }
+    }
+  }
+
+  function marcarRangoActivo(boton) {
+    document.querySelectorAll('.btn-rango').forEach((b) => {
+      b.classList.toggle('activo', b === boton);
+    });
+  }
+
+  function conectarFiltroHistorial() {
+    const ahora = new Date();
+    const horas = Number(HIST.horasPorDefecto) || 2;
+
+    $('histDesde').value = valorParaInput(new Date(ahora.getTime() - horas * 3600000));
+    $('histHasta').value = valorParaInput(ahora);
+
+    $('filtroHistorial').addEventListener('submit', (evento) => {
+      evento.preventDefault();
+      cargarTablaHistorial(0);
+    });
+
+    document.querySelectorAll('.btn-rango').forEach((boton) => {
+      boton.addEventListener('click', () => {
+        const horasRango = Number(boton.dataset.horas) || 2;
+        const fin = new Date();
+        $('histDesde').value = valorParaInput(new Date(fin.getTime() - horasRango * 3600000));
+        $('histHasta').value = valorParaInput(fin);
+        marcarRangoActivo(boton);
+        cargarTablaHistorial(0);
+      });
+    });
+
+    $('btnPaginaAnterior').addEventListener('click', () => {
+      if (tablaHistorial.pagina > 0) {
+        cargarTablaHistorial(tablaHistorial.pagina - 1, true);
+      }
+    });
+
+    $('btnPaginaSiguiente').addEventListener('click', () => {
+      if (tablaHistorial.total == null) return;
+      const paginas = Math.ceil(tablaHistorial.total / tablaHistorial.porPagina);
+      if (tablaHistorial.pagina + 1 < paginas) {
+        cargarTablaHistorial(tablaHistorial.pagina + 1, true);
+      }
+    });
+
+    marcarRangoActivo(document.querySelector('.btn-rango[data-horas="' + horas + '"]'));
+  }
+
+  /* --------------------------- MINI-TENDENCIAS ---------------------------- */
 
   function prepararLienzo(canvas) {
     const rect = canvas.getBoundingClientRect();
@@ -781,172 +1071,6 @@
     const ctx = canvas.getContext('2d');
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     return { ctx: ctx, ancho: rect.width, alto: rect.height };
-  }
-
-  const FUENTE_GRAFICA = '11px "Segoe UI", system-ui, sans-serif';
-  const FUENTE_GRANDE = '12px "Segoe UI", system-ui, sans-serif';
-
-  function textoEje(valor, rango) {
-    if (Math.abs(valor) >= 100 || rango >= 50) return String(Math.round(valor));
-    return valor.toFixed(1).replace('.', ',');
-  }
-
-  function dibujarGrafica(idCanvas, def) {
-    const canvas = $(idCanvas);
-    if (!canvas) return;
-    const lienzo = prepararLienzo(canvas);
-    if (!lienzo) return;
-
-    const ctx = lienzo.ctx;
-    const ancho = lienzo.ancho;
-    const alto = lienzo.alto;
-    ctx.clearRect(0, 0, ancho, alto);
-
-    const margen = { izq: 44, der: 12, arriba: 12, abajo: 22 };
-    const area = {
-      x: margen.izq,
-      y: margen.arriba,
-      w: Math.max(10, ancho - margen.izq - margen.der),
-      h: Math.max(10, alto - margen.arriba - margen.abajo)
-    };
-
-    const ahora = Date.now();
-    const desde = ahora - VENTANA_MS;
-    const rango = def.max - def.min;
-
-    const filas = estado.historial.filter((fila) => {
-      const t = new Date(fila.created_at).getTime();
-      return Number.isFinite(t) && t >= desde - 60000 && t <= ahora + 60000;
-    });
-
-    const xDe = (t) => area.x + ((t - desde) / VENTANA_MS) * area.w;
-    const yDe = (v) => area.y + (1 - (v - def.min) / rango) * area.h;
-
-    /* Rejilla y etiquetas del eje Y */
-    ctx.lineWidth = 1;
-    ctx.font = FUENTE_GRAFICA;
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    const pasos = def.pasos || 4;
-    for (let i = 0; i <= pasos; i++) {
-      const y = area.y + (area.h * i) / pasos;
-      const valor = def.max - (rango * i) / pasos;
-      ctx.beginPath();
-      ctx.strokeStyle = i === pasos ? 'rgba(255,255,255,.10)' : 'rgba(255,255,255,.055)';
-      ctx.moveTo(area.x, y + 0.5);
-      ctx.lineTo(area.x + area.w, y + 0.5);
-      ctx.stroke();
-      ctx.fillStyle = '#7f93a8';
-      ctx.fillText(textoEje(valor, rango), area.x - 8, y);
-    }
-
-    /* Etiquetas de tiempo */
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    for (let i = 0; i <= 4; i++) {
-      const t = desde + (VENTANA_MS * i) / 4;
-      const x = xDe(t);
-      ctx.fillStyle = '#61778b';
-      const etiqueta = FMT_HORA_CORTA.format(new Date(t));
-      if (i === 0) { ctx.textAlign = 'left'; ctx.fillText(etiqueta, area.x, area.y + area.h + 7); }
-      else if (i === 4) { ctx.textAlign = 'right'; ctx.fillText(etiqueta, area.x + area.w, area.y + area.h + 7); }
-      else { ctx.textAlign = 'center'; ctx.fillText(etiqueta, x, area.y + area.h + 7); }
-    }
-
-    if (!filas.length) {
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = '#61778b';
-      ctx.font = FUENTE_GRANDE;
-      ctx.fillText('Sin datos en las últimas ' + CFG.actualizacion.ventanaHoras + ' horas', area.x + area.w / 2, area.y + area.h / 2);
-      return;
-    }
-
-    /* Líneas de límite (solo si caen dentro de la escala) */
-    const etiquetasLimite = [];
-    def.canales.forEach((idCanal) => {
-      const canal = CANAL_POR_ID[idCanal];
-      if (!canal || canal.max == null) return;
-      if (canal.max < def.min || canal.max > def.max) return;
-      const y = yDe(canal.max);
-      ctx.save();
-      ctx.beginPath();
-      ctx.setLineDash([5, 5]);
-      ctx.strokeStyle = 'rgba(255, 95, 99, .38)';
-      ctx.lineWidth = 1;
-      ctx.moveTo(area.x, y + 0.5);
-      ctx.lineTo(area.x + area.w, y + 0.5);
-      ctx.stroke();
-      ctx.restore();
-
-      etiquetasLimite.push({ y: y, texto: 'límite ' + numero(canal.max, 0) });
-    });
-
-    /* Series */
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(area.x, area.y, area.w, area.h);
-    ctx.clip();
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-
-    def.canales.forEach((idCanal) => {
-      const canal = CANAL_POR_ID[idCanal];
-      if (!canal) return;
-
-      ctx.beginPath();
-      ctx.strokeStyle = canal.color;
-      ctx.lineWidth = 2;
-      let trazando = false;
-      let anteriorT = null;
-      let ultimoPunto = null;
-
-      filas.forEach((fila) => {
-        const valor = fila[idCanal];
-        const t = new Date(fila.created_at).getTime();
-        if (!Number.isFinite(valor) || !Number.isFinite(t) || valor < def.min - rango || valor > def.max + rango) {
-          trazando = false;
-          anteriorT = null;
-          return;
-        }
-        if (anteriorT !== null && t - anteriorT > 120000) trazando = false;
-        const x = xDe(t);
-        const y = yDe(valor);
-        if (!trazando) { ctx.moveTo(x, y); trazando = true; }
-        else ctx.lineTo(x, y);
-        anteriorT = t;
-        ultimoPunto = { x: x, y: y };
-      });
-      ctx.stroke();
-
-      if (ultimoPunto) {
-        ctx.beginPath();
-        ctx.fillStyle = canal.color;
-        ctx.globalAlpha = 0.22;
-        ctx.arc(ultimoPunto.x, ultimoPunto.y, 6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = 1;
-        ctx.beginPath();
-        ctx.fillStyle = canal.color;
-        ctx.arc(ultimoPunto.x, ultimoPunto.y, 3, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    });
-
-    ctx.restore();
-
-    /* Etiquetas de los límites, por encima de las series para que se lean */
-    ctx.font = FUENTE_GRAFICA;
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'bottom';
-    etiquetasLimite.forEach((etiqueta) => {
-      const anchoTexto = ctx.measureText(etiqueta.texto).width;
-      const x = area.x + area.w - 2;
-      ctx.fillStyle = 'rgba(17, 26, 34, .92)';
-      ctx.fillRect(x - anchoTexto - 5, etiqueta.y - 15, anchoTexto + 7, 13);
-      ctx.fillStyle = 'rgba(255, 138, 141, .85)';
-      ctx.fillText(etiqueta.texto, x, etiqueta.y - 2);
-    });
   }
 
   function dibujarSparkline(canvas, canal) {
@@ -1015,26 +1139,6 @@
       ctx.lineTo(ancho, alto - 4);
       ctx.stroke();
     }
-  }
-
-  function pintarGraficas() {
-    Object.keys(CFG.graficas).forEach((clave) => {
-      const def = CFG.graficas[clave];
-      dibujarGrafica(def.idGrafica, def);
-    });
-  }
-
-  function crearLeyendas() {
-    Object.keys(CFG.graficas).forEach((clave) => {
-      const def = CFG.graficas[clave];
-      const contenedor = $(def.idLeyenda);
-      if (!contenedor) return;
-      contenedor.innerHTML = def.canales.map((idCanal) => {
-        const canal = CANAL_POR_ID[idCanal];
-        if (!canal) return '';
-        return '<span style="--color:' + canal.color + '"><i></i>' + escapar(canal.corto) + '</span>';
-      }).join('');
-    });
   }
 
   /* ------------------------------- RELOJ ---------------------------------- */
@@ -1116,7 +1220,6 @@
       pendiente = true;
       window.requestAnimationFrame(() => {
         pendiente = false;
-        pintarGraficas();
         PRINCIPALES.forEach((canal) => {
           const ref = tarjetas[canal.id];
           if (ref) dibujarSparkline(ref.lienzo, canal);
@@ -1126,20 +1229,22 @@
     window.addEventListener('resize', redibujar);
     if (window.ResizeObserver) {
       const observador = new ResizeObserver(redibujar);
-      document.querySelectorAll('canvas.grafica').forEach((c) => observador.observe(c.parentElement));
+      document.querySelectorAll('canvas.sparkline').forEach((c) => observador.observe(c.parentElement));
     }
   }
 
   async function iniciar() {
     aplicarIdentidad();
     crearTarjetas();
-    crearLeyendas();
+    crearCabeceraHistorial();
+    conectarFiltroHistorial();
     conectarBotonPantalla();
     observarTamano();
     pintarReloj();
     tick();
 
     await Promise.all([cargarHistorial(), cargarUltima()]);
+    cargarTablaHistorial(0);
 
     setInterval(cargarUltima, CFG.actualizacion.ultimaMs);
     setInterval(cargarHistorial, CFG.actualizacion.historialMs);
@@ -1149,6 +1254,9 @@
       if (!document.hidden) {
         cargarUltima();
         cargarHistorial();
+        if (tablaHistorial.hasta && (Date.now() - tablaHistorial.hasta.getTime()) < 300000) {
+          cargarTablaHistorial(tablaHistorial.pagina, true);
+        }
       }
     });
   }

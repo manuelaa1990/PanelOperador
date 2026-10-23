@@ -70,30 +70,47 @@
         <!-- Tarjetas grandes: solo los canales marcados como principales -->
         <div class="kpis" id="kpis"></div>
 
-        <!-- Dos gráficas de tendencia con escala fija -->
-        <div class="graficas">
-          <article class="panel">
-            <header class="panel-cabecera">
-              <h3>Temperaturas · últimas 2 horas</h3>
-              <div class="leyenda" id="leyendaTemperaturas"></div>
-            </header>
-            <div class="grafica-caja">
-              <canvas class="grafica" id="graficaTemperaturas" role="img"
-                      aria-label="Tendencia de temperaturas de las últimas dos horas"></canvas>
+        <!-- Historial consultable por rango de fechas -->
+        <article class="panel panel-historial">
+          <header class="panel-cabecera">
+            <h3>Historial de lecturas</h3>
+            <div class="rangos-rapidos" role="group" aria-label="Rangos rápidos">
+              <button type="button" class="btn-rango" data-horas="2">2 h</button>
+              <button type="button" class="btn-rango" data-horas="24">24 h</button>
+              <button type="button" class="btn-rango" data-horas="168">7 días</button>
             </div>
-          </article>
+          </header>
 
-          <article class="panel">
-            <header class="panel-cabecera">
-              <h3>Presiones · últimas 2 horas</h3>
-              <div class="leyenda" id="leyendaPresiones"></div>
-            </header>
-            <div class="grafica-caja">
-              <canvas class="grafica" id="graficaPresiones" role="img"
-                      aria-label="Tendencia de presiones de las últimas dos horas"></canvas>
+          <form class="filtro-historial" id="filtroHistorial">
+            <label>
+              Desde
+              <input type="datetime-local" id="histDesde" required>
+            </label>
+            <label>
+              Hasta
+              <input type="datetime-local" id="histHasta" required>
+            </label>
+            <button type="submit" class="btn-consultar" id="btnConsultar">Consultar</button>
+          </form>
+
+          <p class="historial-info" id="historialInfo" aria-live="polite">Consultando…</p>
+
+          <div class="tabla-caja">
+            <table class="tabla-historial" aria-label="Historial de lecturas">
+              <thead id="historialCabecera"></thead>
+              <tbody id="historialCuerpo"></tbody>
+            </table>
+          </div>
+
+          <footer class="tabla-pie">
+            <span id="tablaRangoInfo">—</span>
+            <div class="paginacion">
+              <button type="button" class="btn-pagina" id="btnPaginaAnterior">Anterior</button>
+              <span id="paginaActual">Página 1 de 1</span>
+              <button type="button" class="btn-pagina" id="btnPaginaSiguiente">Siguiente</button>
             </div>
-          </article>
-        </div>
+          </footer>
+        </article>
       </section>
 
       <aside class="derecha">

@@ -40,8 +40,14 @@ window.CONFIG_SUPERVISION = {
   /* --------------------------- RITMO DE ACTUALIZACIÓN --------------------- */
   actualizacion: {
     ultimaMs: 10000,      // consultar la última lectura cada 10 s
-    historialMs: 60000,   // refrescar la gráfica cada 60 s
-    ventanaHoras: 2       // la gráfica muestra las últimas 2 horas
+    historialMs: 60000,   // refrescar tarjetas y mini-tendencias cada 60 s
+    ventanaHoras: 2       // ventana de las mini-tendencias de las tarjetas
+  },
+
+  /* ------------------------------- HISTORIAL ------------------------------ */
+  historial: {
+    porPagina: 100,       // filas por página de la tabla
+    horasPorDefecto: 2    // rango inicial al abrir el panel
   },
 
   /* ------------------------------- FRESCURA ------------------------------- */
@@ -88,7 +94,7 @@ window.CONFIG_SUPERVISION = {
      CANALES
      --------------------------------------------------------------------------
      nombre      texto que ve el vigilante (sin siglas técnicas)
-     corto       etiqueta de la gráfica
+     corto       etiqueta corta de la tarjeta y de la tabla
      unidad      °C o PSI
      decimales   cifras decimales que se muestran
      principal   true  -> tarjeta grande arriba
@@ -97,7 +103,7 @@ window.CONFIG_SUPERVISION = {
      aviso       valor de precaución (ámbar)
      min         límite inferior de alarma (opcional)
      avisoMin    precaución inferior (opcional)
-     color       color de la tarjeta y de la línea en la gráfica
+     color       color de la tarjeta y de la mini-tendencia
      accion      recomendación que aparece en la alarma
      -------------------------------------------------------------------------- */
   canales: [
@@ -137,35 +143,5 @@ window.CONFIG_SUPERVISION = {
       id: 'temp5', nombre: 'Temperatura ambiente', corto: 'T. ambiente',
       unidad: '°C', decimales: 1, principal: false, color: '#facc15'
     }
-  ],
-
-  /* --------------------------------------------------------------------------
-     GRÁFICAS
-     --------------------------------------------------------------------------
-     Se usan escalas fijas para que la pantalla no "baile" entre actualizaciones
-     y sea fácil comparar a simple vista. Ajuste min/max si su planta trabaja en
-     otro rango. Las líneas de límite se dibujan solas a partir de `canales`.
-     -------------------------------------------------------------------------- */
-  graficas: {
-    temperaturas: {
-      titulo: 'Temperaturas',
-      unidad: '°C',
-      min: -20,
-      max: 120,
-      pasos: 7,
-      canales: ['temp3', 'temp1', 'temp5'],
-      idGrafica: 'graficaTemperaturas',
-      idLeyenda: 'leyendaTemperaturas'
-    },
-    presiones: {
-      titulo: 'Presiones',
-      unidad: 'PSI',
-      min: 0,
-      max: 400,
-      pasos: 4,
-      canales: ['presion_alta', 'presion_baja'],
-      idGrafica: 'graficaPresiones',
-      idLeyenda: 'leyendaPresiones'
-    }
-  }
+  ]
 };

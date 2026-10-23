@@ -17,8 +17,8 @@ escribe el ESP32 cada 10 segundos.
 |---|---|
 | Cabecera | Cliente, planta, hora local, estado de la conexión y botón de pantalla completa |
 | Franja de estado | Un solo mensaje grande: **Sistema en orden**, **Requiere atención**, **Alarma activa**, **Sin señal** o **Equipo en reposo** |
-| Tarjetas grandes | Temperatura de descarga, temperatura de succión, presión de descarga y presión de succión, con valor actual, mínimo/máximo de las últimas 2 h y tendencia |
-| Gráficas | Temperaturas y presiones de las últimas 2 horas, con líneas de límite |
+| Tarjetas grandes | Temperatura de descarga, temperatura de succión, presión de descarga y presión de succión, con valor actual, mínimo/máximo de las últimas 2 h y mini-tendencia |
+| Historial | Tabla con todas las variables, filtro por fecha y hora, paginación y estado del equipo en cada lectura |
 | Alarmas | Lista en lenguaje sencillo con el valor, el límite y qué hacer |
 | Estado del equipo | En marcha / en reposo, calidad de la señal WiFi, última lectura y lecturas secundarias |
 | Ayuda | Instrucción permanente: anotar, no manipular y avisar |
@@ -44,6 +44,21 @@ El estado se calcula con los límites de `js/config.js`:
 | Presión de descarga | 320 PSI | 350 PSI |
 | Presión de succión | 110 PSI | 120 PSI |
 
+## Historial de lecturas
+
+La tabla muestra todas las variables de `lecturas_hvac` y el estado del equipo
+(**Marcha / Reposo**) en cada lectura.
+
+- Se puede escribir un rango **Desde / Hasta** o usar los botones **2 h**, **24 h**
+  y **7 días**.
+- El rango inicial es de las últimas 2 horas; se cambia con
+  `historial.horasPorDefecto` en `js/config.js`.
+- La tabla trae **100 filas por página** y permite avanzar y retroceder. El total
+  se calcula con Supabase, así que un rango de varios días sigue siendo consultable.
+- Las fechas se muestran en la zona horaria de `zonaHoraria` (`America/Caracas`).
+- La tabla se consulta con el botón **Consultar**; no se recarga sola mientras se
+  está leyendo una página antigua.
+
 ## Archivos
 
 ```
@@ -51,7 +66,8 @@ supervision/
 ├── index.html          estructura de la pantalla
 ├── css/estilos.css     diseño oscuro y adaptabilidad
 ├── js/config.js        TODO lo configurable (cliente, Supabase, límites)
-├── js/app.js           lectura de datos, alarmas y gráficas
+├── js/app.js           lectura de datos, alarmas e historial
+├── docs/estados.png    captura de referencia
 └── README.md
 ```
 
@@ -65,6 +81,7 @@ sin frameworks, y funciona sin conexión a Internet salvo para consultar Supabas
    - `contacto.nombre` y `contacto.telefono`: a quién llamar.
    - `supabase.url`, `supabase.clave` y `supabase.tabla`.
    - Límites de cada canal (`aviso`, `max`, opcionalmente `min`).
+   - `historial.porPagina` y `historial.horasPorDefecto` para la tabla.
 2. Abra `index.html` en el navegador. Para evitar restricciones de archivos
    locales, se recomienda servirlo por HTTP:
 
@@ -83,7 +100,8 @@ sin frameworks, y funciona sin conexión a Internet salvo para consultar Supabas
 - `index.html?demo=1&aviso=1`: simula una lectura cerca del límite (ámbar).
 - `index.html?demo=1&alarma=1`: simula una temperatura de descarga alta (rojo).
 
-En modo demo aparece la etiqueta **DEMO** en la cabecera.
+En modo demo aparece la etiqueta **DEMO** en la cabecera y el historial genera
+datos simulados para el rango que se consulte.
 
 ## Supabase
 
@@ -145,7 +163,8 @@ Opciones recomendadas para el monitor fijo:
 
 - Desactivar el apagado de pantalla y la suspensión del equipo.
 - Colocar el acceso directo en la carpeta de inicio de Windows.
-- El panel se actualiza solo: no hace falta recargar ni tocar el teclado.
+- Las tarjetas y alarmas se actualizan solas: no hace falta recargar la página.
+- El historial se consulta con el botón **Consultar** cuando se necesite.
 - La tecla `F` o el botón de la cabecera activan pantalla completa.
 
 El panel está pensado para 16:9 y también se adapta a tabletas y teléfonos, aunque
@@ -154,8 +173,9 @@ en esos tamaños la información se apila y requiere desplazamiento.
 ## Cómo funciona la actualización
 
 - Última lectura: cada **10 s**.
-- Historial de las gráficas: cada **60 s**.
+- Mínimos, máximos y mini-tendencias de las tarjetas: cada **60 s**.
 - Edad de la lectura y reloj: cada **1 s**.
+- Historial: se consulta con el botón **Consultar** y se pagina de 100 en 100.
 - Si una consulta falla, conserva el último dato y reintenta automáticamente.
 - A los **45 s** sin lectura nueva avisa; a los **3 min** declara **Sin señal**.
 
@@ -183,9 +203,11 @@ https://SU-PROYECTO.supabase.co/rest/v1/lecturas_hvac?select=*&order=created_at.
 - **Cambiar un límite:** `aviso` y `max` del canal correspondiente.
 - **Añadir otro canal a una tarjeta:** agregue el objeto al arreglo `canales` con
   `principal: true` y su `id` igual al nombre de la columna en Supabase.
-- **Añadir una serie a una gráfica:** incluya el `id` del canal en
-  `graficas.temperaturas.canales` o `graficas.presiones.canales`.
-- **Cambiar la ventana de las gráficas:** `actualizacion.ventanaHoras`.
+- **Añadir una columna al historial:** agregue el canal al arreglo `canales`;
+  la tabla toma automáticamente todos los canales configurados.
+- **Cambiar la ventana de las mini-tendencias:** `actualizacion.ventanaHoras`.
+- **Cambiar filas por página o rango inicial del historial:** `historial.porPagina`
+  y `historial.horasPorDefecto`.
 - **Mostrar el teléfono del técnico:** `contacto.telefono`.
 
 Si cambia la cantidad de tarjetas principales, revise la rejilla en
