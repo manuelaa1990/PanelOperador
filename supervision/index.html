@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#0a0f14">
+  <title>Supervisión · Sala de vigilancia</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0f14'/%3E%3Ccircle cx='16' cy='17' r='8' fill='none' stroke='%2354c7ff' stroke-width='2.4'/%3E%3Cpath d='M16 17l4-4' stroke='%2354c7ff' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/estilos.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ============================== CABECERA ============================== -->
+    <header class="cabecera">
+      <div class="marca">
+        <div class="logo" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+               stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="8.5"></circle>
+            <path d="M12 12l3.5-2.6"></path>
+            <path d="M12 3.5v2M20.5 12h-2M12 20.5v-2M3.5 12h2"></path>
+          </svg>
+        </div>
+        <div class="marca-texto">
+          <p class="cliente" id="txtCliente">Cliente</p>
+          <h1 id="txtPlanta">Sala de máquinas</h1>
+        </div>
+        <span class="etiqueta-demo" id="etiquetaDemo" hidden>DEMO</span>
+      </div>
+
+      <div class="chip-conexion neutro" id="chipConexion" role="status">
+        <span class="punto" aria-hidden="true"></span>
+        <span id="txtConexion">Conectando…</span>
+      </div>
+
+      <div class="reloj">
+        <time id="reloj">--:--:--</time>
+        <span id="fecha">—</span>
+      </div>
+
+      <button type="button" class="btn-pantalla" id="btnPantalla" title="Pantalla completa (F)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M8 3H3v5M16 3h5v5M21 16v5h-5M3 16v5h5"></path>
+        </svg>
+        <span>Pantalla completa</span>
+      </button>
+    </header>
+
+    <!-- ========================= ESTADO GENERAL ============================ -->
+    <section class="banner neutro" id="banner" aria-live="polite">
+      <div class="banner-icono" id="bannerIcono" aria-hidden="true">…</div>
+      <div class="banner-texto">
+        <h2 id="bannerTitulo">Conectando</h2>
+        <p id="bannerDetalle">Esperando la primera lectura del equipo.</p>
+      </div>
+      <div class="banner-edad">
+        <span>Última lectura</span>
+        <strong id="txtEdad">—</strong>
+        <small id="txtHoraUltima"></small>
+      </div>
+    </section>
+
+    <!-- ============================== CONTENIDO ============================ -->
+    <main class="rejilla">
+
+      <section class="izquierda">
+        <!-- Tarjetas grandes: solo los canales marcados como principales -->
+        <div class="kpis" id="kpis"></div>
+
+        <!-- Dos gráficas de tendencia con escala fija -->
+        <div class="graficas">
+          <article class="panel">
+            <header class="panel-cabecera">
+              <h3>Temperaturas · últimas 2 horas</h3>
+              <div class="leyenda" id="leyendaTemperaturas"></div>
+            </header>
+            <div class="grafica-caja">
+              <canvas class="grafica" id="graficaTemperaturas" role="img"
+                      aria-label="Tendencia de temperaturas de las últimas dos horas"></canvas>
+            </div>
+          </article>
+
+          <article class="panel">
+            <header class="panel-cabecera">
+              <h3>Presiones · últimas 2 horas</h3>
+              <div class="leyenda" id="leyendaPresiones"></div>
+            </header>
+            <div class="grafica-caja">
+              <canvas class="grafica" id="graficaPresiones" role="img"
+                      aria-label="Tendencia de presiones de las últimas dos horas"></canvas>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <aside class="derecha">
+        <!-- Alarmas: lo primero que debe mirar el vigilante -->
+        <article class="panel panel-alarmas">
+          <header class="panel-cabecera">
+            <h3>Alarmas</h3>
+            <span class="contador" id="contadorAlarmas">0</span>
+          </header>
+          <div class="lista-alarmas" id="listaAlarmas" aria-live="polite"></div>
+        </article>
+
+        <!-- Estado del equipo y lecturas secundarias -->
+        <article class="panel panel-equipo">
+          <header class="panel-cabecera">
+            <h3>Estado del equipo</h3>
+            <span class="chip-equipo neutro" id="chipEquipo">Sin datos</span>
+          </header>
+
+          <dl class="datos-equipo">
+            <div>
+              <dt>Señal del equipo</dt>
+              <dd><span class="senal" id="senalTexto">—</span>
+                <span class="barras" id="senalBarras" aria-hidden="true">
+                  <i></i><i></i><i></i><i></i>
+                </span>
+              </dd>
+            </div>
+            <div>
+              <dt>Última lectura recibida</dt>
+              <dd id="equipoUltima">—</dd>
+            </div>
+          </dl>
+
+          <div class="otras">
+            <h4>Otras lecturas</h4>
+            <ul id="otrasLecturas"></ul>
+          </div>
+        </article>
+
+        <!-- Instrucción permanente para personal sin conocimientos técnicos -->
+        <article class="panel panel-ayuda">
+          <h3>Si aparece una alarma</h3>
+          <ol>
+            <li>Anote la hora y el valor que aparece en rojo.</li>
+            <li>No manipule ni reinicie el equipo.</li>
+            <li id="ayudaContacto">Avise al técnico de guardia.</li>
+          </ol>
+        </article>
+      </aside>
+    </main>
+
+    <!-- =============================== PIE ================================= -->
+    <footer class="pie">
+      <span class="leyenda-colores">
+        <i class="ok"></i> Normal
+        <i class="aviso"></i> Precaución
+        <i class="critico"></i> Alarma
+      </span>
+      <span id="pieLimites">—</span>
+      <span id="pieActualizacion">—</span>
+    </footer>
+  </div>
+
+  <noscript>
+    <p style="padding:24px;font-family:sans-serif;color:#fff">
+      Este panel necesita JavaScript activado para mostrar los datos.
+    </p>
+  </noscript>
+
+  <script src="js/config.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
